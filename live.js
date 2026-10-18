@@ -30,6 +30,7 @@ let t = 0, speed = 1, playing = !still.matches, visible = false, frame = 0, last
 let arrived = new Set();
 let lastWrites = [];
 let focusId = null;
+let looking = false; // pointer is over the board or a panel: autoplay holds the next edge
 const lever = Object.fromEntries(Object.keys(MUX).map((id) => [id, { at: 0, to: 0 }]));
 
 // ── formatting ─────────────────────────────────────────────────────────────────────────
@@ -136,11 +137,11 @@ function tick(now) {
     moving ||= l.at !== l.to;
   }
   phase();
-  if (playing && t >= EDGE_AT + HOLD) clockEdge();
+  if (playing && !looking && t >= EDGE_AT + HOLD) clockEdge();
   const busy = moving || t < EDGE_AT || playing;
-  frame = visible && busy ? requestAnimationFrame(tick) : 0;
+  frame = (visible || playing) && busy ? requestAnimationFrame(tick) : 0;
 }
-const run = () => { if (!frame && visible) { last = 0; frame = requestAnimationFrame(tick); } };
+const run = () => { if (!frame && (visible || playing)) { last = 0; frame = requestAnimationFrame(tick); } };
 
 function drawLever(id) {
   const m = MUX[id], l = lever[id].at;
@@ -153,15 +154,19 @@ function drawLever(id) {
 function phase() {
   const level = Math.floor(t / LEVEL_MS);
   const name = t >= EDGE_AT ? "Clock edge" : PHASES[Math.min(level, PHASES.length - 1)];
-  const text = `${hex(state.pc)} · ${res.line.asm} · ${t >= EDGE_AT ? (playing ? "settled, edge next" : "settled · press Clock") : name.toLowerCase()}`;
-  if (readout.textContent !== text) readout.textContent = text;
+  const done = t >= EDGE_AT;
+  const status = !done ? `${name.toLowerCase()}…` : !playing ? "all signals settled · press Clock to commit" : looking ? "held while you look" : "all signals settled · clock edge next";
+  const text = `${hex(state.pc)} · ${res.line.asm} · ${status}`;
+  stepBtn.toggleAttribute("data-ready", done && !playing);
+  if (readout.textContent !== text) { readout.textContent = text; nowEl.textContent = text; }
   for (const s of $$("[data-phase]")) s.toggleAttribute("data-on", s.dataset.phase === name);
 }
 
 // ── panels ─────────────────────────────────────────────────────────────────────────────
 function panels() {
   for (const li of $$(".prog li")) { li.toggleAttribute("data-on", !mode && Number(li.dataset.i) === res.index); }
-  if (!mode) $(".prog li[data-on]")?.scrollIntoView({ block: "nearest" });
+  const on = !mode && $(".prog li[data-on]"), list = $(".prog");
+  if (on && (on.offsetTop < list.scrollTop || on.offsetTop + on.offsetHeight > list.scrollTop + list.clientHeight)) list.scrollTop = on.offsetTop - list.clientHeight / 2;
   const given = mode ? Object.entries(mode.regs).map(([n, v]) => `$${n} = ${v}`).join(", ") : "";
   $("[data-note]").textContent = mode ? `Running ${res.line.asm} on its own${given ? ` with ${given}` : ""}. After each clock edge the PC is put back, so the same instruction runs again on the new state.` : res.line.note;
   encoding();
@@ -310,8 +315,14 @@ function focus(id, event) {
   inspect(id);
   for (const f of $$(".fld")) f.toggleAttribute("data-on", (FIELD_WIRES[f.dataset.f] ?? []).includes(id));
   tip.hidden = false;
-  tip.innerHTML = META[id] ? `<b>${INFO.wires[id][0]}</b><span>${arrived.has(id) ? fmt(id) : "…"}</span>` : `<b>${(INFO.units[id] ?? [id])[0]}</b>`;
+  tip.innerHTML = META[id] ? tipWire(id) : `<b>${(INFO.units[id] ?? [id])[0]}</b><p>${(INFO.units[id] ?? ["", ""])[1]}</p>`;
   moveTip(event);
+}
+function tipWire(id) {
+  const w = META[id], name = id.startsWith("c_") ? id.slice(2) : null, x = name && res.control.x.includes(name);
+  const kind = { data: "32-bit data", field: `${w.width}-bit field`, bool: "1-bit", ctl: `${w.width}-bit control` }[w.kind];
+  const status = !arrived.has(id) ? "on its way" : x ? "don't care" : res.used.has(id) ? "used" : "not used this cycle";
+  return `<b>${INFO.wires[id][0]}</b><span class="tv">${arrived.has(id) ? fmt(id) : "…"}</span><span class="tk">${kind} · ${status}</span><p>${INFO.wires[id][1]}</p>`;
 }
 function clearFocus() {
   focusId = null;
@@ -330,9 +341,13 @@ function moveTip(event) {
 const pick = (target) => { const w = target.closest?.(".tr"); if (w) return w.dataset.w; const u = target.closest?.(".unit, .step-cap"); return u ? u.dataset.unit : null; };
 board.addEventListener("pointermove", (event) => { const id = pick(event.target); if (id) focus(id, event); else if (focusId) { clearFocus(); overview(); } });
 board.addEventListener("pointerleave", () => { clearFocus(); overview(); });
+board.addEventListener("pointerdown", (event) => { if (event.pointerType !== "mouse") { const id = pick(event.target); if (id) focus(id, event); else { clearFocus(); overview(); } } });
 board.addEventListener("click", (event) => { if (event.target.closest(".step-cap")) { hold(); clockEdge(); } });
 
 // ── controls ───────────────────────────────────────────────────────────────────────────
+const stepBtn = $("[data-act=step]");
+const nowEl = $("[data-now]");
+for (const el of [stage, ...$$(".enc, .cols")]) { el.addEventListener("pointerenter", () => { looking = true; }); el.addEventListener("pointerleave", () => { looking = false; run(); }); }
 function hold() { playing = false; playBtn(); }
 const playBtn = () => { $("[data-act=play]").textContent = playing ? "Pause" : "Play"; };
 $("[data-act=step]").addEventListener("click", () => { hold(); clockEdge(); });
@@ -356,10 +371,11 @@ function back() {
   startCycle();
 }
 document.addEventListener("keydown", (event) => {
-  if (event.target.closest("select, input, textarea") || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.target.closest("select, input, textarea") || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+  if (event.target !== document.body && !event.target.closest(".iso-stage, .deck, .dock")) return;
   if (event.key === "ArrowRight") { hold(); clockEdge(); }
   else if (event.key === "ArrowLeft") back();
-  else if (event.key === " " && !event.target.closest("button")) { playing = !playing; playBtn(); run(); }
+  else if (event.key === " " && event.target.closest(".iso-stage")) { playing = !playing; playBtn(); run(); }
   else if (event.key === "r" || event.key === "R") startCycle();
   else return;
   event.preventDefault();

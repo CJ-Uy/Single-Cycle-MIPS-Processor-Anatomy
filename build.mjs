@@ -293,7 +293,7 @@ function caps() {
 // Silkscreen: the bit ranges and signal names printed on the board, as on the slide.
 function silkscreen() {
   const out = [];
-  const label = (spt, text, anchor) => out.push(silkS(spt, text, 3.4, anchor));
+  const label = (spt, text, anchor) => out.push(silkS(spt, text, 4.2, anchor));
   label([352, 226], "Instruction [25–0]");
   label([388, 469], "Instruction [31–26]");
   label([388, 604], "[25–21]");
@@ -356,6 +356,11 @@ const body = `
   <p class="eyebrow">Computer organisation · study figure</p>
   <h1>The single-cycle MIPS processor, as a circuit board</h1>
   <p class="lede">Every instruction runs from one clock edge to the next. Watch the values ripple from the PC through the board, see which wires the instruction really uses, and which 1-bit control lines (amber) steer it there.</p>
+  <ol class="quick">
+    <li><b>Press Clock</b> (or →) to run one instruction. Values ripple out from the PC, unit by unit.</li>
+    <li><b>Read the wires.</b> Wide = 32-bit data, thin amber = 1-bit control, LED lit = 1. Faded = nothing uses it this cycle.</li>
+    <li><b>Hover anything</b> for its value and job. Try one instruction alone with <b>Run one on its own</b> below.</li>
+  </ol>
 </header>
 ${k.plateHtml({
   fig: "Fig 1",
@@ -372,7 +377,7 @@ ${k.plateHtml({
   caption: "Layout follows Patterson & Hennessy's datapath with Jump (JAL, JR, JALR omitted). The clock period must fit the slowest instruction, lw: PC → instruction memory → registers → ALU → data memory → MemtoReg mux → register file. Every other instruction waits for it — the price of a single cycle.",
   body: `<div class="iso-stage" tabindex="0" role="group" aria-label="Single-cycle MIPS board. Right arrow steps one clock cycle, left arrow steps back, space plays or pauses, R replays the cycle.">${svg}<div class="tip" hidden></div></div>`,
 })}
-<section class="deck" aria-label="Controls">
+<div class="dock" aria-label="Clock controls">
   <div class="bar">
     <div class="group">
       <button data-act="prev" title="Step back (←)">◀ Back</button>
@@ -393,6 +398,9 @@ ${k.plateHtml({
     </div>
   </div>
   <div class="phases" aria-hidden="true">${["Fetch", "Decode", "Read regs", "Execute", "Memory", "Write-back", "Next PC", "Clock edge"].map((p) => `<span data-phase="${p}">${p}</span>`).join("")}</div>
+  <p class="now" data-now aria-live="off"></p>
+</div>
+<section class="deck" aria-label="Instruction details">
   <article class="panel enc">
     <div class="enc-head">
       <h2>Instruction <small data-format></small></h2>
