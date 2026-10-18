@@ -73,6 +73,7 @@ function startCycle() {
   for (const key of Object.keys(lcdEl)) lcdEl[key].textContent = "";
   for (const g of Object.values(ledEl)) if (g.dataset.led !== "power") g.dataset.on = "0";
   panels();
+  phase();
   run();
 }
 
