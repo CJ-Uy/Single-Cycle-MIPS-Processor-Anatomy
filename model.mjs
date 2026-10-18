@@ -8,13 +8,14 @@ export const DATA_BASE = 0x10010000;
 export const REG_NAMES = ["zero", "at", "v0", "v1", "a0", "a1", "a2", "a3", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "t8", "t9", "k0", "k1", "gp", "sp", "fp", "ra"];
 const R = Object.fromEntries(REG_NAMES.map((name, index) => [name, index]));
 
-const OP = { R: 0x00, j: 0x02, beq: 0x04, lw: 0x23, sw: 0x2b };
+const OP = { R: 0x00, j: 0x02, beq: 0x04, addi: 0x08, lw: 0x23, sw: 0x2b };
 const FUNCT = { add: 0x20, sub: 0x22, and: 0x24, or: 0x25, slt: 0x2a };
 
 const rType = (name, rd, rs, rt) => ({ asm: `${name} $${rd}, $${rs}, $${rt}`, word: ((R[rs] << 21) | (R[rt] << 16) | (R[rd] << 11) | FUNCT[name]) >>> 0 });
 const iType = (name, rs, rt, imm, asm) => ({ asm, word: ((OP[name] << 26) | (R[rs] << 21) | (R[rt] << 16) | (imm & 0xffff)) >>> 0 });
 const mem = (name, rt, offset, base) => iType(name, base, rt, offset, `${name} $${rt}, ${offset}($${base})`);
 const beq = (rs, rt, offset) => iType("beq", rs, rt, offset, `beq $${rs}, $${rt}, ${offset}`);
+const addi = (rt, rs, imm) => iType("addi", rs, rt, imm, `addi $${rt}, $${rs}, ${imm}`);
 const jump = (target) => ({ asm: `j 0x${hex(target)}`, word: ((OP.j << 26) | ((target >>> 2) & 0x3ffffff)) >>> 0 });
 
 export const PROGRAM = [
@@ -28,8 +29,28 @@ export const PROGRAM = [
   { ...rType("slt", "t5", "t2", "t1"), note: "$t5 = (5 < 7) = 1." },
   { ...beq("t5", "zero", -9), note: "1 ≠ 0, so not taken. Its offset is negative: watch the sign extender." },
   { ...rType("or", "t6", "t1", "t2"), note: "$t6 = 7 | 5 = 7." },
+  { ...addi("t7", "t7", 1), note: "Count the trips round the loop: $t7 = $t7 + 1." },
   { ...jump(TEXT_BASE), note: "Jump back to the start: the loop never ends." },
 ];
+
+// One example of every instruction the board runs, each with its own starting registers.
+export const CATALOG = [
+  { name: "add", format: "R", syntax: "add rd, rs, rt", rtl: "R[rd] ← R[rs] + R[rt]", line: rType("add", "t3", "t1", "t2"), regs: { t1: 7, t2: 5 } },
+  { name: "sub", format: "R", syntax: "sub rd, rs, rt", rtl: "R[rd] ← R[rs] − R[rt]", line: rType("sub", "t3", "t1", "t2"), regs: { t1: 7, t2: 5 } },
+  { name: "and", format: "R", syntax: "and rd, rs, rt", rtl: "R[rd] ← R[rs] & R[rt]", line: rType("and", "t3", "t1", "t2"), regs: { t1: 12, t2: 10 } },
+  { name: "or", format: "R", syntax: "or rd, rs, rt", rtl: "R[rd] ← R[rs] | R[rt]", line: rType("or", "t3", "t1", "t2"), regs: { t1: 12, t2: 10 } },
+  { name: "slt", format: "R", syntax: "slt rd, rs, rt", rtl: "R[rd] ← (R[rs] < R[rt]) ? 1 : 0", line: rType("slt", "t3", "t1", "t2"), regs: { t1: -2, t2: 5 } },
+  { name: "addi", format: "I", syntax: "addi rt, rs, imm", rtl: "R[rt] ← R[rs] + SignExt(imm)", line: addi("t3", "t1", -3), regs: { t1: 7 } },
+  { name: "lw", format: "I", syntax: "lw rt, offset(rs)", rtl: "R[rt] ← M[R[rs] + SignExt(offset)]", line: mem("lw", "t3", 4, "s0"), regs: {} },
+  { name: "sw", format: "I", syntax: "sw rt, offset(rs)", rtl: "M[R[rs] + SignExt(offset)] ← R[rt]", line: mem("sw", "t1", 8, "s0"), regs: { t1: 42 } },
+  { name: "beq", format: "I", syntax: "beq rs, rt, offset", rtl: "if R[rs] = R[rt]: PC ← PC+4 + SignExt(offset)×4", line: beq("t1", "t2", 3), regs: { t1: 5, t2: 5 } },
+  { name: "j", format: "J", syntax: "j target", rtl: "PC ← PC+4[31–28] ∥ target ∥ 00", line: jump(TEXT_BASE + 0x40), regs: {} },
+];
+export function catalogState(entry) {
+  const state = initialState();
+  for (const [name, value] of Object.entries(entry.regs)) state.regs[R[name]] = value >>> 0;
+  return state;
+}
 
 export function initialState() {
   const regs = new Array(32).fill(0);
@@ -47,9 +68,10 @@ const CONTROL = {
   lw: { RegDst: 0, ALUSrc: 1, MemtoReg: 1, RegWrite: 1, MemRead: 1, MemWrite: 0, Branch: 0, ALUOp: 0, Jump: 0, x: [] },
   sw: { RegDst: 0, ALUSrc: 1, MemtoReg: 0, RegWrite: 0, MemRead: 0, MemWrite: 1, Branch: 0, ALUOp: 0, Jump: 0, x: ["RegDst", "MemtoReg"] },
   beq: { RegDst: 0, ALUSrc: 0, MemtoReg: 0, RegWrite: 0, MemRead: 0, MemWrite: 0, Branch: 1, ALUOp: 1, Jump: 0, x: ["RegDst", "MemtoReg"] },
+  addi: { RegDst: 0, ALUSrc: 1, MemtoReg: 0, RegWrite: 1, MemRead: 0, MemWrite: 0, Branch: 0, ALUOp: 0, Jump: 0, x: [] },
   j: { RegDst: 0, ALUSrc: 0, MemtoReg: 0, RegWrite: 0, MemRead: 0, MemWrite: 0, Branch: 0, ALUOp: 0, Jump: 1, x: ["RegDst", "ALUSrc", "MemtoReg", "ALUOp"] },
 };
-const CLASS_OF = { 0x00: "R", 0x23: "lw", 0x2b: "sw", 0x04: "beq", 0x02: "j" };
+const CLASS_OF = { 0x00: "R", 0x08: "addi", 0x23: "lw", 0x2b: "sw", 0x04: "beq", 0x02: "j" };
 export const SIGNALS = ["RegDst", "Jump", "Branch", "MemRead", "MemtoReg", "ALUOp", "MemWrite", "ALUSrc", "RegWrite"];
 
 export function control(opcode) {
@@ -102,10 +124,10 @@ export const LEVEL = {
 export const LEVELS = 9;
 
 // One clock cycle: every wire's value, which wires matter, and the state after the edge.
-export function step(state) {
+export function step(state, program = PROGRAM) {
   const pc = state.pc >>> 0;
   const index = (pc - TEXT_BASE) / 4;
-  const line = PROGRAM[index];
+  const line = program[index];
   if (!line || !Number.isInteger(index)) throw new Error(`no instruction at 0x${hex(pc)}`);
   const word = line.word;
   const f = {

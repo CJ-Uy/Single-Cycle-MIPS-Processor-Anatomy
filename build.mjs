@@ -393,6 +393,17 @@ ${k.plateHtml({
     </div>
   </div>
   <div class="phases" aria-hidden="true">${["Fetch", "Decode", "Read regs", "Execute", "Memory", "Write-back", "Next PC", "Clock edge"].map((p) => `<span data-phase="${p}">${p}</span>`).join("")}</div>
+  <article class="panel enc">
+    <div class="enc-head">
+      <h2>Instruction <small data-format></small></h2>
+      <div class="picker" role="group" aria-label="Run one instruction on its own">
+        <span>Run one on its own:</span>${M.CATALOG.map((e) => `<button data-try="${e.name}" aria-pressed="false">${e.name}</button>`).join("")}<button data-try="program" aria-pressed="true" class="prog-btn">Whole program</button>
+      </div>
+    </div>
+    <div class="enc-row"><code class="syntax" data-syntax></code><span class="means">means</span><code class="rtl" data-rtl></code></div>
+    <div class="fields" data-fields></div>
+    <p class="enc-note">Hover a field to light the board traces its bits travel on. The fields are split off by wiring alone, no logic.</p>
+  </article>
   <div class="cols">
     <article class="panel">
       <h2>Program <small>click a line to jump there</small></h2>

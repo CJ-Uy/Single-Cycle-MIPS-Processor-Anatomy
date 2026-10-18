@@ -22,7 +22,9 @@ const HOLD = 1700;
 const PHASES = ["Fetch", "Decode", "Decode", "Read regs", "Execute", "Execute", "Memory", "Write-back", "Next PC"];
 
 let state = initialState();
-let res = step(state);
+let mode = null; // null = whole program, else a CATALOG entry
+const prog = () => (mode ? [mode.line] : PROGRAM);
+let res = step(state, prog());
 const history = [];
 let t = 0, speed = 1, playing = !still.matches, visible = false, frame = 0, last = 0, idle = 0;
 let arrived = new Set();
@@ -104,8 +106,8 @@ function clockEdge() {
   lastWrites = res.writes;
   history.push(state);
   if (history.length > 200) history.shift();
-  state = res.after;
-  res = step(state);
+  state = mode ? { ...res.after, pc: TEXT_BASE } : res.after;
+  res = step(state, prog());
   startCycle();
 }
 function arriveDue(limit) {
@@ -158,9 +160,11 @@ function phase() {
 
 // ── panels ─────────────────────────────────────────────────────────────────────────────
 function panels() {
-  for (const li of $$(".prog li")) { li.toggleAttribute("data-on", Number(li.dataset.i) === res.index); }
-  $(".prog li[data-on]")?.scrollIntoView({ block: "nearest" });
-  $("[data-note]").textContent = res.line.note;
+  for (const li of $$(".prog li")) { li.toggleAttribute("data-on", !mode && Number(li.dataset.i) === res.index); }
+  if (!mode) $(".prog li[data-on]")?.scrollIntoView({ block: "nearest" });
+  const given = mode ? Object.entries(mode.regs).map(([n, v]) => `$${n} = ${v}`).join(", ") : "";
+  $("[data-note]").textContent = mode ? `Running ${res.line.asm} on its own${given ? ` with ${given}` : ""}. After each clock edge the PC is put back, so the same instruction runs again on the new state.` : res.line.note;
+  encoding();
   const kind = res.control.kind;
   $("[data-kindline]").textContent = `${kind === "R" ? "R-type" : kind} · opcode ${bin(res.fields.op, 6)}`;
   for (const row of $$("tr[data-sig]")) {
@@ -193,7 +197,7 @@ function stateTable() {
 function overview() {
   $("[data-insp-title]").textContent = "Inspector";
   const n = res.used.size;
-  const kinds = { R: "an R-type", lw: "a load", sw: "a store", beq: "a branch", j: "a jump" };
+  const kinds = { R: "an R-type", addi: "an add-immediate", lw: "a load", sw: "a store", beq: "a branch", j: "a jump" };
   $("[data-insp]").innerHTML = `<p class="big"><code>${res.line.asm}</code> is ${kinds[res.control.kind]}.</p>
   <p>This cycle uses <b>${n}</b> of ${WIRES.length} wires. Faded wires still carry values — every unit computes something every cycle — but nothing that is written at the clock edge depends on them.</p>
   ${res.control.kind === "beq" ? `<p>Zero = ${res.value.zero}, so the branch is <b>${res.taken ? "taken" : "not taken"}</b>: next PC = 0x${hex(res.after.pc)}.</p>` : ""}
@@ -223,6 +227,71 @@ function inspect(id) {
     $("[data-insp]").innerHTML = `<p>${desc}</p>${ins.length ? `<h3>In</h3><ul class="io">${list(ins)}</ul>` : ""}${outs.length ? `<h3>Out</h3><ul class="io">${list(outs)}</ul>` : ""}`;
   }
 }
+// ── instruction encoding ───────────────────────────────────────────────────────────────
+const FORMAT = { R: "R", addi: "I", lw: "I", sw: "I", beq: "I", j: "J" };
+const LAYOUT = {
+  R: [["op", 31, 26], ["rs", 25, 21], ["rt", 20, 16], ["rd", 15, 11], ["shamt", 10, 6], ["funct", 5, 0]],
+  I: [["op", 31, 26], ["rs", 25, 21], ["rt", 20, 16], ["imm", 15, 0]],
+  J: [["op", 31, 26], ["target", 25, 0]],
+};
+const FIELD_WIRES = { op: ["f_op"], rs: ["f_rs"], rt: ["f_rt", "f_rt_mux"], rd: ["f_rd"], shamt: [], funct: ["f_funct"], imm: ["f_imm", "f_funct"], target: ["f_target"] };
+const ROLE = {
+  R: { rs: "1st source", rt: "2nd source", rd: "destination", shamt: "shift amount · not wired here", funct: "which ALU operation" },
+  addi: { rs: "source", rt: "destination", imm: "constant, sign-extended" },
+  lw: { rs: "base address", rt: "destination", imm: "byte offset, sign-extended" },
+  sw: { rs: "base address", rt: "value to store", imm: "byte offset, sign-extended" },
+  beq: { rs: "compared", rt: "compared", imm: "offset in words" },
+  j: { target: "word address" },
+};
+const entryOf = (asm) => CATALOG.find((e) => e.name === asm.split(" ")[0]);
+function encoding() {
+  const kind = res.control.kind, format = FORMAT[kind], entry = entryOf(res.line.asm);
+  $("[data-format]").textContent = `${format}-format · ${format === "R" ? "register" : format === "I" ? "immediate" : "jump"}`;
+  $("[data-syntax]").textContent = `${res.line.asm}   ← ${entry.syntax}`;
+  $("[data-rtl]").textContent = entry.rtl;
+  for (const b of $$("[data-try]")) b.setAttribute("aria-pressed", String(mode ? b.dataset.try === mode.name : b.dataset.try === "program"));
+  const word = res.word;
+  $("[data-fields]").innerHTML = LAYOUT[format].map(([name, hi, lo]) => {
+    const width = hi - lo + 1, v = (word >>> lo) & (2 ** width - 1);
+    const meaning = name === "op" ? `${v} = ${kind === "R" ? "R-type" : kind}`
+      : ["rs", "rt", "rd"].includes(name) ? `${v} = ${regName(v)}`
+      : name === "funct" ? `${v} = ${res.alu.name}`
+      : name === "imm" ? `0x${hex(v, 4)} = ${(v << 16) >> 16}`
+      : name === "target" ? `×4 → 0x${hex(res.value.jaddr)}` : String(v);
+    const role = name === "op" ? "tells Control the kind" : ROLE[kind === "R" ? "R" : kind]?.[name] ?? "";
+    return `<div class="fld" data-f="${name}" style="grid-column:span ${width}"><span class="fn">${name}<i>[${hi}${hi === lo ? "" : "–" + lo}]</i></span><code class="fb">${bin(v, width)}</code><span class="fv">${meaning}</span><span class="fo">${role}</span></div>`;
+  }).join("");
+}
+function lightWires(ids) {
+  for (const el of $$(".on-focus", board)) el.classList.remove("on-focus");
+  if (!ids) { delete board.dataset.focus; return; }
+  board.dataset.focus = "";
+  for (const id of ids) wireEl[id]?.classList.add("on-focus");
+  if (ids.length) unitEl[ROUTES[ids[0]].to]?.classList.add("on-focus");
+}
+$("[data-fields]").addEventListener("pointerover", (event) => { const f = event.target.closest(".fld"); if (!f) return; for (const o of $$(".fld")) o.toggleAttribute("data-on", o === f); lightWires(FIELD_WIRES[f.dataset.f]); });
+$("[data-fields]").addEventListener("pointerleave", () => { for (const o of $$(".fld")) o.removeAttribute("data-on"); lightWires(null); });
+
+let saved = null;
+function enterCatalog(entry) {
+  hold();
+  if (!mode) saved = { state, history: [...history] };
+  mode = entry;
+  history.length = 0;
+  lastWrites = [];
+  state = catalogState(entry);
+  res = step(state, prog());
+  startCycle();
+}
+function leaveCatalog() {
+  mode = null;
+  history.length = 0;
+  if (saved) { state = saved.state; history.push(...saved.history); }
+  lastWrites = [];
+  res = step(state, prog());
+}
+for (const b of $$("[data-try]")) b.addEventListener("click", () => { if (b.dataset.try === "program") { hold(); if (mode) { leaveCatalog(); startCycle(); } } else enterCatalog(CATALOG.find((e) => e.name === b.dataset.try)); });
+
 const unitName = (u) => INFO.units[u]?.[0] ?? { fields: "instruction fields", instr: "instruction bus", jaddr: "jump address join" }[u] ?? u;
 
 // ── focus and hover ────────────────────────────────────────────────────────────────────
@@ -239,6 +308,7 @@ function focus(id, event) {
     for (const w of WIRES) if (ROUTES[w.id].from === id || ROUTES[w.id].to === id || (id === "imem" && w.id === "instr")) wireEl[w.id].classList.add("on-focus");
   }
   inspect(id);
+  for (const f of $$(".fld")) f.toggleAttribute("data-on", (FIELD_WIRES[f.dataset.f] ?? []).includes(id));
   tip.hidden = false;
   tip.innerHTML = META[id] ? `<b>${INFO.wires[id][0]}</b><span>${arrived.has(id) ? fmt(id) : "…"}</span>` : `<b>${(INFO.units[id] ?? [id])[0]}</b>`;
   moveTip(event);
@@ -247,6 +317,7 @@ function clearFocus() {
   focusId = null;
   delete board.dataset.focus;
   for (const el of $$(".on-focus", board)) el.classList.remove("on-focus");
+  for (const f of $$(".fld[data-on]")) f.removeAttribute("data-on");
   tip.hidden = true;
 }
 function moveTip(event) {
@@ -274,14 +345,14 @@ $("[data-act=theme]").addEventListener("click", (event) => { const dark = docume
 try { if (localStorage.getItem("mips-theme") === "dark") $("[data-act=theme]").click(); } catch {}
 for (const b of $$("[data-view]")) b.addEventListener("click", () => { for (const o of $$("[data-view]")) o.setAttribute("aria-pressed", String(o === b)); board.dataset.view = b.dataset.view; });
 board.dataset.view = "all";
-for (const li of $$(".prog li")) li.addEventListener("click", () => { hold(); history.push(state); state = { ...state, pc: TEXT_BASE + Number(li.dataset.i) * 4 }; lastWrites = []; res = step(state); startCycle(); });
+for (const li of $$(".prog li")) li.addEventListener("click", () => { hold(); if (mode) { leaveCatalog(); } history.push(state); state = { ...state, pc: TEXT_BASE + Number(li.dataset.i) * 4 }; lastWrites = []; res = step(state, prog()); startCycle(); });
 $("[data-insp]").addEventListener("pointerover", (event) => { const ref = event.target.closest("[data-ref]"); for (const el of $$(".tr.ref", board)) el.classList.remove("ref"); if (ref) wireEl[ref.dataset.ref].classList.add("ref"); });
 function back() {
   hold();
   if (!history.length) return;
   state = history.pop();
   lastWrites = [];
-  res = step(state);
+  res = step(state, prog());
   startCycle();
 }
 document.addEventListener("keydown", (event) => {
