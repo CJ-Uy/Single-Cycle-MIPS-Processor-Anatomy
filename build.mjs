@@ -355,69 +355,52 @@ const body = `
 <header class="intro">
   <p class="eyebrow">Computer organisation · study figure</p>
   <h1>The single-cycle MIPS processor, as a circuit board</h1>
-  <p class="lede">Every instruction runs from one clock edge to the next. Watch the values ripple from the PC through the board, see which wires the instruction really uses, and which 1-bit control lines (amber) steer it there.</p>
   <ol class="quick">
-    <li><b>Press Clock</b> (or →) to run one instruction. Values ripple out from the PC, unit by unit.</li>
-    <li><b>Read the wires.</b> Wide = 32-bit data, thin amber = 1-bit control, LED lit = 1. Faded = nothing uses it this cycle.</li>
-    <li><b>Hover anything</b> for its value and job. Try one instruction alone with <b>Run one on its own</b> below.</li>
+    <li><b>Pick an instruction</b> above the board. Its signals ripple out from the PC, and the wires it really uses stay dark.</li>
+    <li><b>Zoom and pan.</b> Scroll or pinch to zoom, drag to move, double-click to zoom in, 0 to fit.</li>
+    <li><b>Hover anything</b> for its value and job. Wide = 32-bit data, thin amber = 1-bit control, LED lit = 1.</li>
   </ol>
 </header>
+<div class="toolbar">
+  <div class="picker" role="group" aria-label="Instruction to run">
+    <span>Instruction</span>${M.CATALOG.map((e) => `<button data-try="${e.name}" aria-pressed="false">${e.name}</button>`).join("")}
+    <button data-act="replay" class="replay" title="Run the ripple again (R)">↻ Replay</button>
+  </div>
+  <div class="group seg" role="group" aria-label="Show">
+    <button data-view="all" aria-pressed="true">All wires</button>
+    <button data-view="bool" aria-pressed="false">1-bit only</button>
+    <button data-view="data" aria-pressed="false">Data only</button>
+    <button data-view="used" aria-pressed="false">Used path</button>
+  </div>
+  <div class="group">
+    <button data-act="labels" aria-pressed="true">Labels</button>
+    <button data-act="theme">Dark</button>
+  </div>
+</div>
 ${k.plateHtml({
   fig: "Fig 1",
   title: "Single-cycle datapath",
-  hint: "Hover a wire or chip · press STEP",
+  hint: "Scroll to zoom · drag to pan · hover to inspect",
   readout: "",
   keys: [
     { mark: "bus", label: "32-bit data bus: wide trace" },
     { mark: "field", label: "Instruction field (4–28 bits): medium trace" },
     { mark: "ctl", label: "1-bit control / flag: amber, LED lit = 1" },
-    { mark: "dashed", label: "Don't-care (X) or unused this cycle: faded" },
-    { mark: "flow", label: "Moving dashes: value this instruction uses" },
+    { mark: "dashed", label: "Don't-care (X) or unused by this instruction: faded" },
+    { mark: "flow", label: "Moving dashes: a value this instruction uses" },
   ],
   caption: "Layout follows Patterson & Hennessy's datapath with Jump (JAL, JR, JALR omitted). The clock period must fit the slowest instruction, lw: PC → instruction memory → registers → ALU → data memory → MemtoReg mux → register file. Every other instruction waits for it — the price of a single cycle.",
-  body: `<div class="iso-stage" tabindex="0" role="group" aria-label="Single-cycle MIPS board. Right arrow steps one clock cycle, left arrow steps back, space plays or pauses, R replays the cycle.">${svg}<div class="tip" hidden></div></div>`,
+  body: `<div class="iso-stage" tabindex="0" role="group" aria-label="Single-cycle MIPS board. Plus and minus zoom, 0 fits, arrow keys pan, R replays the instruction.">${svg}<div class="zoom" role="group" aria-label="Zoom"><button data-zoom="out" aria-label="Zoom out">−</button><span data-zoom-level>100%</span><button data-zoom="in" aria-label="Zoom in">+</button><button data-zoom="fit">Fit</button></div><div class="tip" hidden></div></div>`,
 })}
-<div class="dock" aria-label="Clock controls">
-  <div class="bar">
-    <div class="group">
-      <button data-act="prev" title="Step back (←)">◀ Back</button>
-      <button data-act="step" class="primary" title="Clock edge (→)">Clock ▶</button>
-      <button data-act="play" title="Play / pause (space)">Pause</button>
-      <button data-act="replay" title="Replay this cycle (R)">Replay</button>
-      <label class="speed">Speed <select data-act="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label>
-    </div>
-    <div class="group seg" role="radiogroup" aria-label="Show">
-      <button data-view="all" aria-pressed="true">All wires</button>
-      <button data-view="bool" aria-pressed="false">1-bit only</button>
-      <button data-view="data" aria-pressed="false">Data only</button>
-      <button data-view="used" aria-pressed="false">Used path</button>
-    </div>
-    <div class="group">
-      <button data-act="labels" aria-pressed="true">Labels</button>
-      <button data-act="theme">Dark</button>
-    </div>
-  </div>
-  <div class="phases" aria-hidden="true">${["Fetch", "Decode", "Read regs", "Execute", "Memory", "Write-back", "Next PC", "Clock edge"].map((p) => `<span data-phase="${p}">${p}</span>`).join("")}</div>
-  <p class="now" data-now aria-live="off"></p>
-</div>
+<div class="phases" aria-hidden="true">${["Fetch", "Decode", "Read regs", "Execute", "Memory", "Write-back", "Next PC", "Clock edge"].map((p) => `<span data-phase="${p}">${p}</span>`).join("")}</div>
 <section class="deck" aria-label="Instruction details">
   <article class="panel enc">
-    <div class="enc-head">
-      <h2>Instruction <small data-format></small></h2>
-      <div class="picker" role="group" aria-label="Run one instruction on its own">
-        <span>Run one on its own:</span>${M.CATALOG.map((e) => `<button data-try="${e.name}" aria-pressed="false">${e.name}</button>`).join("")}<button data-try="program" aria-pressed="true" class="prog-btn">Whole program</button>
-      </div>
-    </div>
+    <div class="enc-head"><h2>Encoding <small data-format></small></h2><p class="note" data-note></p></div>
     <div class="enc-row"><code class="syntax" data-syntax></code><span class="means">means</span><code class="rtl" data-rtl></code></div>
     <div class="fields" data-fields></div>
     <p class="enc-note">Hover a field to light the board traces its bits travel on. The fields are split off by wiring alone, no logic.</p>
   </article>
   <div class="cols">
-    <article class="panel">
-      <h2>Program <small>click a line to jump there</small></h2>
-      <ol class="prog">${M.PROGRAM.map((line, i) => `<li data-i="${i}"><span class="addr">${M.hex(M.TEXT_BASE + i * 4)}</span><code class="word">${M.hex(line.word)}</code><span class="asm">${line.asm}</span></li>`).join("")}</ol>
-      <p class="note" data-note></p>
-    </article>
     <article class="panel">
       <h2>Control signals <small data-kindline></small></h2>
       <table class="sig"><tbody>${M.SIGNALS.map((s) => `<tr data-sig="${s}"><th>${s}</th><td class="v"><span class="bit"></span></td><td class="why"></td></tr>`).join("")}</tbody></table>
@@ -426,14 +409,12 @@ ${k.plateHtml({
     <article class="panel">
       <h2 data-insp-title>Inspector</h2>
       <div class="insp" data-insp></div>
-      <h2 class="sub">State <small>changes at the clock edge</small></h2>
-      <div class="state" data-state></div>
     </article>
   </div>
 </section>`;
 
 const CSS = read("page.css");
-let html = k.pageHtml({ title: "Single-cycle MIPS · anatomy", theme: "light", width: 1180, body, script: strip("kit/iso-kit.mjs") + "\n" + strip("model.mjs") + `\nconst DATA = ${JSON.stringify(DATA)};\n` + read("live.js") });
+let html = k.pageHtml({ title: "Single-cycle MIPS · anatomy", theme: "light", width: 1280, body, script: strip("kit/iso-kit.mjs") + "\n" + strip("model.mjs") + `\nconst DATA = ${JSON.stringify(DATA)};\n` + read("live.js") });
 html = html.replace("</style>", CSS + "</style>").replace(`<html lang="en">`, `<html lang="en"><!-- built by build.mjs -->`);
 mkdirSync(new URL("./dist/", import.meta.url), { recursive: true });
 writeFileSync(new URL("./dist/index.html", import.meta.url), html);
