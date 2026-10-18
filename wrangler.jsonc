@@ -1,0 +1,9 @@
+{
+  // Static-assets-only Worker: no script, Cloudflare serves dist/ directly.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "single-cycle-mips-anatomy",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist"
+  }
+}
